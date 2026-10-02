@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.8
+#!/usr/bin/env python3
 
 #
 # Imports
@@ -28,14 +28,14 @@ random.seed()
 #
 
 # Version
-VERSION=(0,0,12)
+VERSION=(0,0,14)
 Version = __version__ = ".".join([ str(x) for x in VERSION ])
 
 # Parser
 __Parser__ = None
 
 # Email Addess Expression
-loose_emailaddr_exp = "(?P<username>[\w_-]+)@(?P<domain>([\w\-]+\.)+([\w\-]*))"
+loose_emailaddr_exp = r"(?P<username>[\w_-]+)@(?P<domain>([\w\-]+\.)+([\w\-]*))"
 
 # Email Addess Expression
 emailaddr_exp = r"^(?P<username>[\w_-]+)@(?P<domain>([\w\-]+\.)+([\w\-]*))$"
@@ -381,6 +381,79 @@ def HuntEmailAddressesInJSON(jdoc,level=0):
 
 	return addresses
 
+# Get Entities
+def GetEntities(jdoc):
+	"""
+	Get Entities
+	"""
+
+	items = list()
+
+	entities = jdoc.get("entities",None)
+
+	if entities:
+		items.append(entities)
+
+	return items
+
+# Get VCard Array From Entity Array
+def GetVCardArrays(ent_array):
+	"""
+	Get VCard Arrayfrom Entity
+	"""
+
+	vcardarrs = list()
+
+	for entity in ent_array:
+		for item in entity:
+			if "vcardArray" in item:
+				vcardarrs.append(item.get("vcardArray"))
+
+	return vcardarrs
+
+
+# Get VCards From VCard Array
+def GetVCards(vcardarrs):
+	"""
+	Get VCard from VCard Array
+	"""
+
+	vcards = list()
+
+	for varr in vcardarrs:
+		if "vcard" in varr:
+			vcards.append(varr[1])
+
+	return vcards
+
+# Get Addresses
+def GetAddresses(vcards):
+	"""Get Addr Records From VCards"""
+
+	addrs = list()
+
+	for vcard in vcards:
+		for item in vcard:
+			if "adr" in item:
+				addr = item[1]["label"]
+
+				addrs.append(addr)
+
+	return addrs
+
+# Parse Addresses
+def ParseAddresses(addresses):
+	"""Parse Address Labels"""
+
+	p_addresses = list()
+
+	for address in addresses:
+		items = address.split("\n")
+
+		p_addresses.append(items)
+
+	return p_addresses
+
 # Get Abuse Address
 def GetAbuseAddress(jdoc):
 	"""
@@ -408,6 +481,30 @@ def GetAbuseAddress(jdoc):
 	abusemail = hit if hit else random.choice(others) if len(others) > 0 else ""
 
 	return (abusemail,None)
+
+# Get Country From Entities
+def GetCountryFromEntities(jdoc):
+	"""
+	Try to check for Addresses (country) in Entities
+	"""
+
+	entities = GetEntities(jdoc)
+	varr = GetVCardArrays(entities)
+	vcards = GetVCards(varr)
+	addrs = GetAddresses(vcards)
+
+	country = ""
+
+	if len(addrs) > 0:
+		addresses = ParseAddresses(addrs)
+
+		for address in addresses:
+			country = address[-1]
+
+			if country != "":
+				break
+
+	return country
 
 # Make URL
 def MkUrl(resource,querydata):
@@ -507,6 +604,9 @@ def GetIPInfo(ipaddr,retry_in=10,pause=0):
 		endAddress = payload.get("endAddress",ipaddr)
 		country = payload.get("country","")
 
+		if country == "":
+			country = GetCountryFromEntities(payload)
+
 		parentHandle = payload.get("parentHandle","")
 
 		abuse,others = GetAbuseAddress(payload)
@@ -520,9 +620,12 @@ def GetIPInfo(ipaddr,retry_in=10,pause=0):
 		# result = [ response.status_code, name, handle, startAddress, endAddress, cidr, parentHandle, abuse, payload, country ]
 
 		if LookupCache is not None and response.status_code == 200:
-			value = f"{name}|{handle}|{startAddress}|{endAddress}|{cidr}|{parentHandle}|{abuse}||{country}"
-			LookupCache.Add(ipaddr,value)
-			LookupCache.Expire()
+			try:
+				value = f"{name}|{handle}|{startAddress}|{endAddress}|{cidr}|{parentHandle}|{abuse}||{country}"
+				LookupCache.Add(ipaddr,value)
+				LookupCache.Expire()
+			except Exception as err:
+				DbgMsg(f"Could not add {name}/{cidr} to cache because of {err}")
 
 	if pause > 0:
 		time.sleep(pause)
@@ -656,7 +759,10 @@ def test(args):
 	ModuleMode(False)
 
 	Msg("I do nothing ATM")
-	pass
+
+	info = GetIPInfo("129.49.31.12")
+
+	breakpoint()
 
 #
 # Main Loop
